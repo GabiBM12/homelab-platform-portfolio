@@ -1,0 +1,36 @@
+name: Management runner smoke test
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: management-runner-smoke-test
+  cancel-in-progress: false
+
+jobs:
+  smoke-test:
+    if: >-
+      github.repository == 'GabiBM12/homelab-platform' &&
+      github.event.repository.private == true &&
+      github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Linux, homelab-management]
+    timeout-minutes: 5
+    steps:
+      # No checkout, secrets, sudo, or third-party actions are needed.
+      - name: Verify local execution and tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(id -u)" -ne 0
+          test "$(uname -s)" = Linux
+          printf 'Runner account: %s\n' "$(id -un)"
+          for tool in git ansible terraform packer; do
+            "$tool" --version
+          done
+          smoke_dir=$(mktemp -d "$RUNNER_TEMP/homelab-smoke.XXXXXX")
+          trap 'rm -f -- "$smoke_dir/probe"; rmdir -- "$smoke_dir"' EXIT
+          printf 'runner-ok\n' > "$smoke_dir/probe"
+          test "$(< "$smoke_dir/probe")" = runner-ok
+          printf '### Management runner smoke test passed\n\nLocal tools and temporary-file access verified.\n' >> "$GITHUB_STEP_SUMMARY"
