@@ -1,0 +1,53 @@
+name: Build Ubuntu Proxmox template
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Preflight only, or build a NEW template (never replaces a VM)
+        type: choice
+        options: [preflight, build]
+        default: preflight
+      vm_id:
+        description: Unused VM ID covered by the Packer token ACLs
+        type: string
+        default: '9000'
+        required: true
+      reuse_verified_iso:
+        description: Trust existing ISO on local only if previously verified/uploaded by you
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # Shared across all runs of this build, irrespective of chosen VM ID.
+  group: homelab-packer-pve
+  cancel-in-progress: false
+
+jobs:
+  ubuntu:
+    if: >-
+      github.repository == 'GabiBM12/homelab-platform' &&
+      github.event.repository.private == true &&
+      github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Linux, homelab-management]
+    timeout-minutes: 120
+    steps:
+      - name: Check out reviewed configuration
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Test build helpers without credentials
+        run: python3 -m unittest discover -s packer/ubuntu-2404/tests -v
+      - name: Preflight and optionally build
+        env:
+          BUILD_MODE: ${{ inputs.mode }}
+          BUILD_VM_ID: ${{ inputs.vm_id }}
+          REUSE_VERIFIED_ISO: ${{ inputs.reuse_verified_iso }}
+          PROXMOX_API_URL: ${{ vars.PROXMOX_API_URL }}
+          PACKER_TOKEN_ID: ${{ vars.PACKER_PROXMOX_API_TOKEN_ID }}
+          PACKER_TOKEN_SECRET: ${{ secrets.PACKER_PROXMOX_API_TOKEN_SECRET }}
+          PROXMOX_CA_PEM: ${{ secrets.PROXMOX_CA_PEM }}
+        run: python3 packer/ubuntu-2404/scripts/build.py

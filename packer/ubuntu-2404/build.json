@@ -1,0 +1,13 @@
+{
+  "node": "pve",
+  "iso_storage": "local",
+  "disk_storage": "local-lvm",
+  "bridge": "vmbr0",
+  "iso_url": "https://releases.ubuntu.com/24.04.4/ubuntu-24.04.4-live-server-amd64.iso",
+  "iso_filename": "ubuntu-24.04.4-live-server-amd64.iso",
+  "iso_sha256": "e907d92eeec9df64163a7e454cbc8d7755e8ddc7ed42f99dbc80c40f1a138433",
+  "iso_size": 3405469696,
+  "disk_size_gib": 32,
+  "memory_mib": 4096,
+  "cores": 2
+}
