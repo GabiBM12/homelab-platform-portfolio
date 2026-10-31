@@ -1,0 +1,8 @@
+---
+# API-only execution on the controller; does not use the SSH inventory address.
+proxmox_network_api_url: https://pve.home.locl:8006/api2/json
+proxmox_network_node: pve
+proxmox_network_confirm: false
+# Optional path on the machine RUNNING Ansible, not on Proxmox.
+# Otherwise its system trust store must trust the Proxmox CA.
+proxmox_network_ca_path: "{{ lookup('ansible.builtin.env', 'PROXMOX_CA_PATH') }}"

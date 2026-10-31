@@ -1,0 +1,145 @@
+---
+- name: Create and activate the isolated vmbr10 bridge through the Proxmox API
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars_files:
+    - ../../vars/proxmox-network.yml
+  vars:
+    network_url: "{{ proxmox_network_api_url }}/nodes/{{ proxmox_network_node }}/network"
+  module_defaults:
+    ansible.builtin.uri:
+      headers:
+        Authorization: "PVEAPIToken={{ lookup('ansible.builtin.env', 'PROXMOX_HOST_API_TOKEN_ID') }}={{ lookup('ansible.builtin.env', 'PROXMOX_HOST_API_TOKEN_SECRET') }}"
+      validate_certs: true
+      ca_path: "{{ proxmox_network_ca_path | default('', true) or omit }}"
+      follow_redirects: none
+      use_proxy: false
+      use_netrc: false
+      return_content: true
+      timeout: 30
+  tasks:
+    - name: Validate controller settings and credentials
+      ansible.builtin.assert:
+        that:
+          - proxmox_network_api_url is match('^https://[A-Za-z0-9.-]+(:[0-9]+)?/api2/json$')
+          - proxmox_network_node is match('^[A-Za-z0-9-]+$')
+          - lookup('ansible.builtin.env', 'PROXMOX_HOST_API_TOKEN_ID') | length > 0
+          - lookup('ansible.builtin.env', 'PROXMOX_HOST_API_TOKEN_SECRET') | length > 0
+      no_log: true
+
+    - name: Read current and pending node network configuration
+      ansible.builtin.uri:
+        url: "{{ network_url }}"
+      register: before
+      check_mode: false
+      no_log: true
+
+    - name: Refuse any pre-existing pending changes
+      ansible.builtin.assert:
+        that:
+          - not (before.json.changes | default('', true))
+          - before.json.data | selectattr('iface', 'equalto', 'vmbr0') | list | length == 1
+        fail_msg: Pending network edits exist or vmbr0 is not visible. Review in Proxmox; nothing will be applied.
+
+    - name: Record protected interfaces and any existing bridge
+      ansible.builtin.set_fact:
+        protected_network: "{{ before.json.data | proxmox_network_snapshot }}"
+        existing_bridge: "{{ before.json.data | selectattr('iface', 'equalto', 'vmbr10') | list }}"
+
+    - name: Refuse to overwrite an existing incompatible bridge
+      ansible.builtin.assert:
+        that:
+          - existing_bridge | length == 0 or (existing_bridge[0] | proxmox_internal_bridge_valid)
+        fail_msg: Existing vmbr10 differs from the intended portless, address-free bridge. Review manually; no overwrite attempted.
+
+    - name: Report intended action
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Create and activate vmbr10' if existing_bridge | length == 0
+             else ('Already configured and active; no change' if existing_bridge[0].active | default(false) | bool
+             else 'Activate existing compatible vmbr10') }}.
+          vmbr0 will not be edited. Activation reloads the node network.
+
+    - name: Finish read-only check mode
+      ansible.builtin.meta: end_play
+      when: ansible_check_mode
+
+    - name: Require explicit console and exclusive-change-window confirmation
+      ansible.builtin.assert:
+        that: proxmox_network_confirm | bool
+        fail_msg: Have console recovery access, stop concurrent network/SDN edits, and pass -e proxmox_network_confirm=true.
+      when: existing_bridge | length == 0 or not (existing_bridge[0].active | default(false) | bool)
+
+    - name: Stage only a new portless bridge with no host IP or gateway
+      ansible.builtin.uri:
+        url: "{{ network_url }}"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          iface: vmbr10
+          type: bridge
+          autostart: '1'
+      when: existing_bridge | length == 0
+      changed_when: true
+      no_log: true
+
+    - name: Re-read immediately before possible activation
+      ansible.builtin.uri:
+        url: "{{ network_url }}"
+      register: staged
+      no_log: true
+
+    - name: Verify only the intended bridge was staged
+      ansible.builtin.assert:
+        that:
+          - staged.json.data | proxmox_network_snapshot == protected_network
+          - staged.json.data | selectattr('iface', 'equalto', 'vmbr10') | list | length == 1
+          - (staged.json.data | selectattr('iface', 'equalto', 'vmbr10') | first) | proxmox_internal_bridge_valid
+          - (staged.json.changes | default('', true) | proxmox_bridge_only_diff) if existing_bridge | length == 0 else not (staged.json.changes | default('', true))
+        fail_msg: Unexpected network changes detected. Activation refused; staged configuration is preserved for manual review, not reverted.
+
+    - name: Activate node network configuration using ifupdown2
+      ansible.builtin.uri:
+        url: "{{ network_url }}"
+        method: PUT
+      register: activation
+      when: existing_bridge | length == 0 or not (existing_bridge[0].active | default(false) | bool)
+      changed_when: true
+      no_log: true
+
+    - name: Wait for the network reload task to stop
+      ansible.builtin.uri:
+        url: "{{ proxmox_network_api_url }}/nodes/{{ proxmox_network_node }}/tasks/{{ activation.json.data | urlencode }}/status"
+      register: reload_status
+      until: reload_status.json.data.status | default('unknown') == 'stopped'
+      retries: 30
+      delay: 3
+      when: activation is not skipped
+      no_log: true
+
+    - name: Require successful network reload
+      ansible.builtin.assert:
+        that: reload_status.json.data.exitstatus | default('unknown') == 'OK'
+        fail_msg: Network reload did not succeed. Inspect Proxmox tasks/console; no automatic rollback is performed.
+      when: activation is not skipped
+
+    - name: Verify API connectivity and active bridge
+      ansible.builtin.uri:
+        url: "{{ network_url }}"
+      register: after
+      until: >-
+        (after.json.data | default([]) | selectattr('iface', 'equalto', 'vmbr10')
+        | selectattr('active', 'defined') | selectattr('active') | list | length) == 1
+      retries: 10
+      delay: 3
+      no_log: true
+
+    - name: Confirm protected configuration and absence of pending edits
+      ansible.builtin.assert:
+        that:
+          - after.json.data | proxmox_network_snapshot == protected_network
+          - not (after.json.changes | default('', true))
+          - (after.json.data | selectattr('iface', 'equalto', 'vmbr10') | first) | proxmox_internal_bridge_valid
+        success_msg: vmbr10 is configured and active; other visible interface configuration is unchanged.

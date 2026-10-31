@@ -1,0 +1,112 @@
+name: Configure Proxmox vmbr10
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Read-only check, or create and activate vmbr10
+        type: choice
+        options: [check, apply]
+        default: check
+      confirmation:
+        description: For apply, type APPLY vmbr10
+        type: string
+        default: ''
+      console_and_change_window:
+        description: I have console recovery access and no concurrent network or SDN changes will occur
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proxmox-host-network-pve
+  cancel-in-progress: false
+
+jobs:
+  network:
+    if: >-
+      github.repository == 'GabiBM12/homelab-platform' &&
+      github.event.repository.private == true &&
+      github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Linux, homelab-management]
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out reviewed main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Validate mode, confirmation and installed tools
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          CHANGE_WINDOW: ${{ inputs.console_and_change_window }}
+        run: |
+          set -euo pipefail
+          [[ "$MODE" == check || "$MODE" == apply ]]
+          if [[ "$MODE" == apply ]]; then
+            if [[ "$CONFIRMATION" != "APPLY vmbr10" || "$CHANGE_WINDOW" != true ]]; then
+              echo "::error::Apply requires the exact confirmation plus console access and an exclusive change window."
+              exit 1
+            fi
+          fi
+          for tool in ansible-playbook python3 openssl; do
+            command -v "$tool" >/dev/null || { echo "::error::Missing $tool on management"; exit 1; }
+          done
+          ansible-playbook --version
+
+      - name: Test network guards without credentials
+        run: python3 -m unittest discover -s ansible/tests -v
+
+      - name: Validate playbook syntax without credentials
+        working-directory: ansible
+        run: ansible-playbook playbooks/proxmox/configure-vmbr10.yml --syntax-check
+
+      - name: Check or apply node networking through the API
+        id: network
+        working-directory: ansible
+        env:
+          MODE: ${{ inputs.mode }}
+          PROXMOX_HOST_API_TOKEN_ID: ${{ vars.PROXMOX_HOST_API_TOKEN_ID }}
+          PROXMOX_HOST_API_TOKEN_SECRET: ${{ secrets.PROXMOX_HOST_API_TOKEN_SECRET }}
+          PROXMOX_CA_PEM: ${{ secrets.PROXMOX_CA_PEM }}
+        run: |
+          set -euo pipefail
+          umask 077
+          for name in PROXMOX_HOST_API_TOKEN_ID PROXMOX_HOST_API_TOKEN_SECRET PROXMOX_CA_PEM; do
+            [[ -n "${!name}" ]] || { echo "::error::Missing $name"; exit 1; }
+          done
+          work="$(mktemp -d "$RUNNER_TEMP/proxmox-network.XXXXXX")"
+          printf 'temp_dir=%s\n' "$work" >> "$GITHUB_OUTPUT"
+          trap 'rm -rf -- "$work"' EXIT
+          printf '%s\n' "$PROXMOX_CA_PEM" > "$work/proxmox-ca.pem"
+          openssl x509 -in "$work/proxmox-ca.pem" -noout >/dev/null
+          export PROXMOX_CA_PATH="$work/proxmox-ca.pem"
+          unset PROXMOX_CA_PEM
+          # Force this checkout's config so its custom safety filters are loaded.
+          export ANSIBLE_CONFIG="$PWD/ansible.cfg"
+          export ANSIBLE_DEBUG=false
+          unset ANSIBLE_LOG_PATH
+          if [[ "$MODE" == check ]]; then
+            ansible-playbook playbooks/proxmox/configure-vmbr10.yml --check
+            printf '### Proxmox network check passed\n\nRead-only inspection; write permissions and activation were not tested.\n' >> "$GITHUB_STEP_SUMMARY"
+          else
+            ansible-playbook playbooks/proxmox/configure-vmbr10.yml -e proxmox_network_confirm=true
+            printf '### Proxmox network configuration verified\n\nvmbr10 is active. No router, routes, firewall rules or guest network changes were created.\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Clean temporary CA material
+        if: always()
+        env:
+          TEMP_DIR: ${{ steps.network.outputs.temp_dir }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$TEMP_DIR" ]]; then
+            [[ "$TEMP_DIR" == "$RUNNER_TEMP"/proxmox-network.* ]] || exit 1
+            rm -rf -- "$TEMP_DIR"
+          fi
