@@ -72,8 +72,8 @@ jobs:
         working-directory: ansible
         env:
           MODE: ${{ inputs.mode }}
-          PROXMOX_HOST_API_TOKEN_ID: ${{ vars.PACKER_HOST_API_TOKEN_ID }}
-          PROXMOX_HOST_API_TOKEN_SECRET: ${{ secrets.PACKER_HOST_API_TOKEN_SECRET }}
+          PROXMOX_HOST_API_TOKEN_ID: ${{ vars.PACKER_PROXMOX_API_TOKEN_ID }}
+          PROXMOX_HOST_API_TOKEN_SECRET: ${{ secrets.PACKER_PROXMOX_API_TOKEN_SECRET }}
           PROXMOX_CA_PEM: ${{ secrets.PROXMOX_CA_PEM }}
         run: |
           set -euo pipefail
