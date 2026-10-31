@@ -1,0 +1,25 @@
+---
+- name: Prepare explicit opt-in persistent Terraform storage on management
+  hosts: management
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Require Ubuntu management
+      ansible.builtin.assert:
+        that: ansible_facts.distribution == 'Ubuntu'
+    - name: Check existing runner account
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ github_runner_user | default('github-runner') }}"
+    - name: Install deployment helper tools
+      ansible.builtin.apt:
+        name: [python3, openssl, ca-certificates, util-linux]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+    - name: Create private persistent state directory outside checkout
+      ansible.builtin.file:
+        path: /var/lib/homelab-terraform
+        state: directory
+        owner: "{{ github_runner_user | default('github-runner') }}"
+        mode: '0700'

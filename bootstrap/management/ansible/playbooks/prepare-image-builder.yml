@@ -1,0 +1,43 @@
+---
+- name: Prepare image-build tooling and Proxmox name resolution on management
+  hosts: management
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Require Ubuntu management host
+      ansible.builtin.assert:
+        that: ansible_facts.distribution == 'Ubuntu'
+    - name: Validate Proxmox hostname mapping
+      ansible.builtin.assert:
+        that:
+          - management_proxmox_api_hostname is defined
+          - management_proxmox_api_address is defined
+          - management_proxmox_api_hostname is match('^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$')
+          - management_proxmox_api_address is match('^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$')
+          - management_proxmox_api_address.split('.') | map('int') | max <= 255
+        fail_msg: Set the certificate-valid Proxmox hostname and IPv4 address in group_vars/all.yml.
+    - name: Manage the Proxmox API hostname without replacing other hosts entries
+      ansible.builtin.blockinfile:
+        path: /etc/hosts
+        marker: "# {mark} ANSIBLE MANAGED PROXMOX API"
+        block: "{{ management_proxmox_api_address }} {{ management_proxmox_api_hostname }}"
+        backup: true
+    - name: Resolve the Proxmox hostname using the management host resolver
+      ansible.builtin.command:
+        argv: [getent, ahostsv4, "{{ management_proxmox_api_hostname }}"]
+      register: management_proxmox_resolution
+      changed_when: false
+      when: not ansible_check_mode
+    - name: Confirm the hostname resolves only to the configured address
+      ansible.builtin.assert:
+        that:
+          - management_proxmox_resolution.stdout_lines | length > 0
+          - management_proxmox_resolution.stdout_lines | map('split') | map('first') | unique | list == [management_proxmox_api_address]
+        fail_msg: Conflicting name resolution detected. Review older entries in /etc/hosts and local DNS; unrelated entries were preserved.
+      when: not ansible_check_mode
+    - name: Install Packer build helpers without changing firewall or runner registration
+      ansible.builtin.apt:
+        name: [xorriso, openssh-client, openssl]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
