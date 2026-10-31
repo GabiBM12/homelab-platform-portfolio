@@ -108,7 +108,11 @@
           - staged.json.data | proxmox_network_snapshot == protected_network
           - staged.json.data | selectattr('iface', 'equalto', 'vmbr10') | list | length == 1
           - (staged.json.data | selectattr('iface', 'equalto', 'vmbr10') | first) | proxmox_internal_bridge_valid
-          - (staged.json.changes | default('', true) | proxmox_bridge_only_diff) if existing_bridge | length == 0 else not (staged.json.changes | default('', true))
+          - >-
+            ((existing_bridge | length == 0) and
+             (staged.json.changes | default('', true) | proxmox_bridge_only_diff)) or
+            ((existing_bridge | length > 0) and
+             not (staged.json.changes | default('', true)))
         fail_msg: Unexpected network changes detected. Activation refused; staged configuration is preserved for manual review, not reverted.
 
     - name: Activate node network configuration using ifupdown2
