@@ -72,18 +72,29 @@
         fail_msg: Have console recovery access, stop concurrent network/SDN edits, and pass -e proxmox_network_confirm=true.
       when: existing_bridge | length == 0 or not (existing_bridge[0].active | default(false) | bool)
 
-    - name: Stage only a new portless bridge with no host IP or gateway
-      ansible.builtin.uri:
-        url: "{{ network_url }}"
-        method: POST
-        body_format: form-urlencoded
-        body:
-          iface: vmbr10
-          type: bridge
-          autostart: '1'
+    - name: Stage the new bridge with safe error reporting
       when: existing_bridge | length == 0
-      changed_when: true
-      no_log: true
+      block:
+        - name: Stage only a new portless bridge with no host IP or gateway
+          ansible.builtin.uri:
+            url: "{{ network_url }}"
+            method: POST
+            body_format: form-urlencoded
+            body:
+              iface: vmbr10
+              type: bridge
+              autostart: '1'
+          register: bridge_create
+          changed_when: bridge_create.status | default(-1) | int == 200
+          no_log: true
+      rescue:
+        - name: Report HTTP status without exposing credentials
+          ansible.builtin.fail:
+            msg: >-
+              Bridge creation failed.
+              HTTP status: {{ bridge_create.status | default(-1) | int }}.
+              Inspect Proxmox for pending changes before retrying.
+              Raw response and credentials remain hidden.
 
     - name: Re-read immediately before possible activation
       ansible.builtin.uri:
