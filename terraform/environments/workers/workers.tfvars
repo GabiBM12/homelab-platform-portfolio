@@ -5,7 +5,7 @@ proxmox_endpoint = "https://pve.home.locl:8006/"
 admin_username   = "ansible"
 ssh_public_keys = [
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPS0X4f7Sk7yEvVBrhjDfPncixUeXiGPfvQzDnMjsy0h kubernetes-vm",
-  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ11icKI4/e+C1tSk8MpfOAT74BjpoqVQHkl5NbTl8nq k8s-ansible-automation,
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ11icKI4/e+C1tSk8MpfOAT74BjpoqVQHkl5NbTl8nq k8s-ansible-automation",
 ]
 dns_servers = ["192.168.0.1"] # Confirm the router serves DNS.
 
