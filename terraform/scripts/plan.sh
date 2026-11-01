@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+source "$(dirname "$0")/common.sh"
+[[ "${DEPLOY_MODE:-}" == plan ]] || fail "plan.sh requires mode=plan."
+select_stack "${1:-}"
+prepare_terraform
+plan_dir="$state_dir/plans/$GITHUB_RUN_ID"
+[[ ! -e "$plan_dir" ]] || fail "Plan exists; start a NEW workflow run, not a rerun."
+mkdir "$plan_dir"
+terraform -chdir="$root" plan -input=false -lock-timeout=60s -var-file="$config" -out="$plan_dir/deployment.tfplan"
+terraform -chdir="$root" show -json "$plan_dir/deployment.tfplan" > "$work/plan.json"
+python3 "$repo/terraform/scripts/check-plan.py" "$work/plan.json"
+printf '%s\n' "$GITHUB_SHA" > "$plan_dir/revision"
+remote_state_fingerprint > "$plan_dir/state-fingerprint"
+backend_identity > "$plan_dir/backend"
+touch "$plan_dir/ready"
+printf '### %s plan ready\n\nReview logs; apply with plan_run_id `%s` at this same commit.\n' "$stack" "$GITHUB_RUN_ID" >> "$GITHUB_STEP_SUMMARY"

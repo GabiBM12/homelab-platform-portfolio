@@ -1,5 +1,5 @@
 ---
-- name: Prepare explicit opt-in persistent Terraform storage on management
+- name: Prepare persistent Terraform plan and inventory storage on management
   hosts: management
   become: true
   gather_facts: true
@@ -17,7 +17,7 @@
         state: present
         update_cache: true
         cache_valid_time: 3600
-    - name: Create private persistent state directory outside checkout
+    - name: Create private persistent plan directory outside checkout (state is in Azure)
       ansible.builtin.file:
         path: /var/lib/homelab-terraform
         state: directory

@@ -1,0 +1,133 @@
+name: Deploy homelab VMs
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_router:
+        description: Include router VM stack
+        type: boolean
+        default: false
+      deploy_control_plane:
+        description: Include control-plane VM stack
+        type: boolean
+        default: false
+      deploy_workers:
+        description: Include worker VM stack
+        type: boolean
+        default: false
+      mode:
+        description: Plan, or apply saved plans from a previous run
+        type: choice
+        options: [plan, apply]
+        default: plan
+      plan_run_id:
+        description: Apply only - successful plan run ID at the same main commit
+        type: string
+        default: ''
+      first_deployment:
+        description: Confirm every selected stack with missing state has never been deployed
+        type: boolean
+        default: false
+      confirm_network:
+        description: Confirm unique IPs/IDs across stacks, DHCP reservations, routing and capacity
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-homelab-state
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    if: >-
+      github.repository == 'GabiBM12/homelab-platform' &&
+      github.event.repository.private == true &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out reviewed main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install Terraform for CI only
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: '1.14.0'
+          terraform_wrapper: false
+      - name: Test deployment safeguards
+        run: python3 -m unittest discover -s terraform/tests -v
+      - name: Check formatting, validate and run mocked tests (no credentials)
+        run: bash terraform/scripts/validate.sh
+
+  deploy:
+    needs: ci
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: [self-hosted, Linux, homelab-management, terraform-homelab]
+    timeout-minutes: 90
+    env:
+      DEPLOY_MODE: ${{ inputs.mode }}
+      PLAN_RUN_ID: ${{ inputs.plan_run_id }}
+      SELECT_ROUTER: ${{ inputs.deploy_router }}
+      SELECT_CONTROL_PLANE: ${{ inputs.deploy_control_plane }}
+      SELECT_WORKERS: ${{ inputs.deploy_workers }}
+      FIRST_DEPLOYMENT: ${{ inputs.first_deployment }}
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      TF_STATE_STORAGE_ACCOUNT: ${{ vars.TF_STATE_STORAGE_ACCOUNT }}
+      TF_STATE_CONTAINER: ${{ vars.TF_STATE_CONTAINER }}
+      CONFIRM_NETWORK: ${{ inputs.confirm_network }}
+    steps:
+      - name: Check out reviewed main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Check runner prerequisites and all selected state/plan guards
+        run: bash terraform/scripts/preflight.sh
+      - name: Plan router
+        if: inputs.mode == 'plan' && inputs.deploy_router
+        env:
+          TERRAFORM_TOKEN_ID: ${{ vars.PACKER_PROXMOX_API_TOKEN_ID }}
+          TERRAFORM_TOKEN_SECRET: ${{ secrets.PACKER_PROXMOX_API_TOKEN_SECRET }}
+          PROXMOX_CA_PEM: ${{ secrets.PROXMOX_CA_PEM }}
+        run: bash terraform/scripts/plan.sh router
+      - name: Plan control planes
+        if: inputs.mode == 'plan' && inputs.deploy_control_plane
+        env:
+          TERRAFORM_TOKEN_ID: ${{ vars.PACKER_PROXMOX_API_TOKEN_ID }}
+          TERRAFORM_TOKEN_SECRET: ${{ secrets.PACKER_PROXMOX_API_TOKEN_SECRET }}
+          PROXMOX_CA_PEM: ${{ secrets.PROXMOX_CA_PEM }}
+        run: bash terraform/scripts/plan.sh control-plane
+      - name: Plan workers
+        if: inputs.mode == 'plan' && inputs.deploy_workers
+        env:
+          TERRAFORM_TOKEN_ID: ${{ vars.PACKER_PROXMOX_API_TOKEN_ID }}
+          TERRAFORM_TOKEN_SECRET: ${{ secrets.PACKER_PROXMOX_API_TOKEN_SECRET }}
+          PROXMOX_CA_PEM: ${{ secrets.PROXMOX_CA_PEM }}
+        run: bash terraform/scripts/plan.sh workers
+      - name: Apply router
+        if: inputs.mode == 'apply' && inputs.deploy_router
+        env:
+          TERRAFORM_TOKEN_ID: ${{ vars.PACKER_PROXMOX_API_TOKEN_ID }}
+          TERRAFORM_TOKEN_SECRET: ${{ secrets.PACKER_PROXMOX_API_TOKEN_SECRET }}
+          PROXMOX_CA_PEM: ${{ secrets.PROXMOX_CA_PEM }}
+        run: bash terraform/scripts/apply.sh router
+      - name: Apply control planes
+        if: inputs.mode == 'apply' && inputs.deploy_control_plane
+        env:
+          TERRAFORM_TOKEN_ID: ${{ vars.PACKER_PROXMOX_API_TOKEN_ID }}
+          TERRAFORM_TOKEN_SECRET: ${{ secrets.PACKER_PROXMOX_API_TOKEN_SECRET }}
+          PROXMOX_CA_PEM: ${{ secrets.PROXMOX_CA_PEM }}
+        run: bash terraform/scripts/apply.sh control-plane
+      - name: Apply workers
+        if: inputs.mode == 'apply' && inputs.deploy_workers
+        env:
+          TERRAFORM_TOKEN_ID: ${{ vars.PACKER_PROXMOX_API_TOKEN_ID }}
+          TERRAFORM_TOKEN_SECRET: ${{ secrets.PACKER_PROXMOX_API_TOKEN_SECRET }}
+          PROXMOX_CA_PEM: ${{ secrets.PROXMOX_CA_PEM }}
+        run: bash terraform/scripts/apply.sh workers
