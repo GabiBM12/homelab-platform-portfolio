@@ -5,7 +5,7 @@ output "ansible_inventory" {
   value = {
     all = {
       children = {
-        kube_control_plane = {
+        k3s_server = {
           hosts = { for name, vm in module.vm : name => {
             ansible_host = vm.vm.ipv4_address
             ansible_user = vm.vm.ansible_user

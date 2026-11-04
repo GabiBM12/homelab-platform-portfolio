@@ -2,15 +2,24 @@
 - name: Validate the GitHub runner configuration
   ansible.builtin.assert:
     that:
-      - github_runner_url is match('^https://github.com/[^/]+(/[^/]+)?$')
+      - github_runner_url is match('^https://github.com/[^/]+/[^/]+$')
+      - ansible_facts.distribution == 'Ubuntu'
+      - github_runner_group | length == 0
       - "'REPLACE_' not in github_runner_url"
       - github_runner_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
       - github_runner_checksum is match('^sha256:[a-fA-F0-9]{64}$')
       - ansible_facts.architecture in github_runner_architecture_map
     fail_msg: >-
-      Set a valid GitHub repository/organization URL, runner version, and
+      Set a valid private GitHub repository URL, runner version, and
       SHA-256 checksum in inventory/bootstrap/group_vars/all.yml. Use the
       values displayed by GitHub's New self-hosted runner page.
+
+- name: Install ACL support for Ansible's unprivileged runner tasks
+  ansible.builtin.apt:
+    name: acl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
 
 - name: Select the GitHub runner architecture
   ansible.builtin.set_fact:
@@ -120,12 +129,21 @@
       - install
       - "{{ github_runner_user }}"
     chdir: "{{ github_runner_directory }}"
-  when: github_runner_configured is changed
+    creates: "{{ github_runner_directory }}/.service"
 
-- name: Start the GitHub runner service
-  ansible.builtin.command:
-    argv:
-      - "{{ github_runner_directory }}/svc.sh"
-      - start
-    chdir: "{{ github_runner_directory }}"
-  changed_when: false
+- name: Read the installed runner service name
+  ansible.builtin.slurp:
+    src: "{{ github_runner_directory }}/.service"
+  register: github_runner_service_file
+
+- name: Validate the runner service name
+  ansible.builtin.assert:
+    that:
+      - (github_runner_service_file.content | b64decode | trim) is match('^actions\.runner\.[a-zA-Z0-9_.-]+\.service$')
+
+- name: Enable and start the runner service
+  ansible.builtin.systemd_service:
+    name: "{{ github_runner_service_file.content | b64decode | trim }}"
+    enabled: true
+    state: started
+    daemon_reload: true

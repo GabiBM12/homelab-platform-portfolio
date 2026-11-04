@@ -22,7 +22,7 @@ variables {
 run "inventory" {
   command = plan
   assert {
-    condition     = output.ansible_inventory.all.children.kube_node.hosts["test-node"].ansible_host == "10.20.10.11"
+    condition     = output.ansible_inventory.all.children.k3s_agent.hosts["test-node"].ansible_host == "10.20.10.11"
     error_message = "Inventory must contain this role's desired address."
   }
 }

@@ -10,7 +10,7 @@ GitHub-hosted runners without secrets; deployment runs on management. Unchecked
 toggles skip stacks; they never destroy VMs. Adding one worker normally creates
 only that new worker, not all existing VMs.
 
-Deploy and configure the router first; Kubernetes nodes use vmbr10 on
+Deploy and configure the router first; K3s nodes use vmbr10 on
 10.20.10.0/24. Configure each stack through its own tfvars file:
 
 - [Router](environments/router/router.tfvars)
@@ -18,8 +18,8 @@ Deploy and configure the router first; Kubernetes nodes use vmbr10 on
 - [Workers](environments/workers/workers.tfvars)
 
 Terraform owns full cloning, VM hardware, NIC attachment and initial cloud-init
-configuration. Ansible owns ongoing guest configuration and Kubernetes setup.
-Argo CD/application manifests are a later layer. Nothing here deploys Kubernetes,
+configuration. Ansible owns ongoing guest configuration and K3s setup.
+Argo CD/application manifests are a later layer. Nothing here deploys K3s,
 creates a Proxmox cluster, changes host networking, or creates API identities.
 
 Start with a disposable clone to validate the Packer template. The six-VM target

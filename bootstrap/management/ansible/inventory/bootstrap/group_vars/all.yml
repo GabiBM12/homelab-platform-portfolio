@@ -12,11 +12,16 @@ management_apply_package_upgrades: true
 management_install_docker: false
 management_allow_runner_docker: false
 
+# Certificate-valid Proxmox API hostname, resolved locally on management.
+# Applied by playbooks/prepare-image-builder.yml; does not change Proxmox itself.
+management_proxmox_api_hostname: pve.home.locl
+management_proxmox_api_address: 192.168.0.50
+
 # GitHub runner settings. Obtain the version and SHA-256 value from GitHub's
 # "New self-hosted runner" page immediately before registration.
-github_runner_url: https://github.com/REPLACE_OWNER/REPLACE_REPOSITORY
-github_runner_version: REPLACE_WITH_VERSION
-github_runner_checksum: sha256:REPLACE_WITH_SHA256
+github_runner_url: https://github.com/GabiBM12/homelab-platform
+github_runner_version: 2.337.0
+github_runner_checksum: sha256:70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613
 github_runner_name: "{{ inventory_hostname }}"
 github_runner_group: ""
 github_runner_labels:

@@ -3,7 +3,7 @@ resource "proxmox_virtual_environment_vm" "this" {
   node_name   = var.node.proxmox_node
   vm_id       = var.node.vm_id
   description = "Terraform-managed Ubuntu guest; Ansible role: ${var.node.role}"
-  tags        = ["terraform", var.node.role == "router" ? "networking" : "kubernetes", replace(var.node.role, "_", "-")]
+  tags        = ["terraform", var.node.role == "router" ? "networking" : "k3s", replace(var.node.role, "_", "-")]
   started     = true
   on_boot     = true
 

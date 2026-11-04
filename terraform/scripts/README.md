@@ -62,7 +62,7 @@ losing the runner no longer loses the authoritative state.
 6. Run apply at the SAME commit, select router and supply that plan_run_id.
    first_deployment is only needed when planning missing state.
 7. Verify router VM health, then configure routing/NAT/firewall using separate
-   Ansible automation before configuring Kubernetes guests. Deploy control
+   Ansible automation before configuring K3s guests. Deploy control
    planes/workers with their own toggles using the same plan/review/apply process.
 
 All selected plans must come from the supplied plan run. Applying a subset is
@@ -94,7 +94,7 @@ if a later stack fails. Review partial state and make a new plan for remaining
 stacks. Never force-unlock an active job.
 
 Ansible inventories remain at /var/lib/homelab-terraform/STACK/inventory.local.yml.
-Supply both Kubernetes inventory files for cluster-wide configuration.
+Supply both K3s inventory files for cluster-wide configuration.
 Terraform does not use guest SSH private keys.
 
 References:

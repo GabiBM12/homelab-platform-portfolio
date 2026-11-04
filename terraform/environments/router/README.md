@@ -6,7 +6,7 @@ It does not install router software or enable packet forwarding.
 
 Review `router.tfvars`: replace both PUBLIC key placeholders, reserve VM ID 200
 and proposed home-LAN IP 192.168.0.200, and check for subnet overlap with VPNs,
-home networks and future Kubernetes Pod/Service CIDRs. Confirm DNS at 192.168.0.1.
+home networks and future K3s Pod/Service CIDRs. Confirm DNS at 192.168.0.1.
 Both vmbr0 and the active portless vmbr10 must exist on pve.
 
 NIC 0 is WAN/home LAN (vmbr0); NIC 1 is lab LAN (vmbr10, 10.20.10.1/24).
@@ -32,7 +32,7 @@ them before writing Ansible firewall/routing configuration.
 6. Run the workflow with **deploy_control_plane** and/or **deploy_workers**,
    plan then reviewed apply. Their
    tfvars attach all three nodes to vmbr10 with gateway 10.20.10.1.
-7. Verify reachability, DNS and outbound access before separate Kubernetes
+7. Verify reachability, DNS and outbound access before separate K3s
    Ansible configuration. Terraform output is not proof of guest health.
 
 Router state is stored in Azure at homelab/router.tfstate. Saved plans and

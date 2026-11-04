@@ -22,7 +22,7 @@ using this CPU model. Full clones avoid linked-clone runtime dependencies.
 prevent_destroy blocks replacements/deletions while the resource configuration
 remains present. It does not protect against UI/API deletion or removal of the
 entire module/resource configuration. Review every plan; do not bypass this
-guard to perform routine Kubernetes updates. Changing cloud-init inputs is
+guard to perform routine K3s updates. Changing cloud-init inputs is
 not a substitute for ongoing Ansible configuration on already-booted guests.
 
 Network and storage availability, API ACLs, guest sudo behavior, hostname/SSH

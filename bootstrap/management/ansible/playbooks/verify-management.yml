@@ -26,7 +26,7 @@
 
     - name: Check whether the runner is registered
       ansible.builtin.stat:
-        path: /opt/actions-runner/.runner
+        path: "{{ github_runner_directory | default('/opt/actions-runner') }}/.runner"
       register: runner_registration
 
     - name: Report runner registration state
@@ -37,11 +37,26 @@
           The management tools are installed, but the GitHub runner is not
           registered. Run register-github-runner.yml.
 
-    - name: Check the GitHub runner service
+    - name: Read the GitHub runner service name
+      ansible.builtin.slurp:
+        src: "{{ github_runner_directory | default('/opt/actions-runner') }}/.service"
+      become: true
+      register: runner_service_file
+
+    - name: Check the GitHub runner service is active
       ansible.builtin.command:
         argv:
-          - /opt/actions-runner/svc.sh
-          - status
+          - systemctl
+          - is-active
+          - "{{ runner_service_file.content | b64decode | trim }}"
       become: true
       changed_when: false
 
+    - name: Check the GitHub runner service starts at boot
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-enabled
+          - "{{ runner_service_file.content | b64decode | trim }}"
+      become: true
+      changed_when: false

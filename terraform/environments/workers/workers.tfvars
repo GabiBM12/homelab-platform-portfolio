@@ -10,7 +10,7 @@ ssh_public_keys = [
 dns_servers = ["192.168.0.1"] # Confirm the router serves DNS.
 
 nodes = {
-  k8s-worker-01 = {
+  k3s-worker-01 = {
     role          = "worker"
     vm_id         = 211
     proxmox_node  = "pve"
@@ -23,7 +23,7 @@ nodes = {
     gateway       = "10.20.10.1"
     bridge        = "vmbr10"
   }
-  k8s-worker-02 = {
+  k3s-worker-02 = {
     role          = "worker"
     vm_id         = 212
     proxmox_node  = "pve"

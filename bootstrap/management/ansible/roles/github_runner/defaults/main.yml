@@ -1,9 +1,9 @@
 ---
 github_runner_user: github-runner
 github_runner_directory: /opt/actions-runner
-github_runner_url: https://github.com/REPLACE_OWNER/REPLACE_REPOSITORY
-github_runner_version: REPLACE_WITH_VERSION
-github_runner_checksum: sha256:REPLACE_WITH_SHA256
+github_runner_url: https://github.com/GabiBM12/homelab-platform
+github_runner_version: 2.337.0
+github_runner_checksum: sha256:70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613
 github_runner_name: "{{ inventory_hostname }}"
 github_runner_group: ""
 github_runner_labels:

@@ -8,4 +8,7 @@ management_tool_packages:
   - make
   - shellcheck
   - yamllint
-
+  # Local Packer seed ISO generation and temporary build SSH credentials.
+  - xorriso
+  - openssh-client
+  - openssl
