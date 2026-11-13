@@ -1,0 +1,27 @@
+---
+- name: Configure router01 forwarding firewall and outbound NAT
+  hosts: routers
+  become: true
+  gather_facts: false
+  serial: 1
+  pre_tasks:
+    - name: Load optional pipeline sudo credential
+      ansible.builtin.set_fact:
+        ansible_become_password: "{{ lookup('ansible.builtin.env', 'LAB_SUDO_PASSWORD') }}"
+      when: lookup('ansible.builtin.env', 'LAB_SUDO_PASSWORD') | length > 0
+      no_log: true
+    - name: Gather router facts after configuring privilege escalation
+      ansible.builtin.setup:
+  roles:
+    - router_network
+  post_tasks:
+    - name: Check private-node SSH ports from management after apply
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[item].ansible_host }}"
+        port: 22
+        connect_timeout: 5
+        timeout: 20
+      loop: "{{ groups['kubernetes'] }}"
+      delegate_to: localhost
+      become: false
+      when: not ansible_check_mode

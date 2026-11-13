@@ -1,0 +1,114 @@
+---
+- name: Configure management access to the private lab through router01
+  hosts: management
+  become: true
+  gather_facts: true
+  vars:
+    route_file: /etc/netplan/90-homelab-route.yaml
+  tasks:
+    - name: Validate explicit interface selection and activation consent
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'Ubuntu'
+          - management_lab_netplan_type in ['ethernets', 'bridges', 'bonds', 'wifis']
+          - management_lab_netplan_id | length > 0
+          - "'REPLACE' not in management_lab_netplan_id"
+          - not (management_lab_route_apply | bool) or (management_network_console_available | bool)
+        fail_msg: Select the existing management Netplan interface ID; activation requires console access.
+
+    - name: Read merged Netplan configuration
+      ansible.builtin.command: netplan get
+      register: netplan_current
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Require an existing interface definition
+      ansible.builtin.assert:
+        that:
+          - management_lab_netplan_id in ((netplan_current.stdout | from_yaml).network[management_lab_netplan_type] | default({}))
+        fail_msg: Use the existing Netplan definition ID, which may differ from the Linux interface name.
+
+    - name: Reject conflicting routes for the lab subnet
+      ansible.builtin.assert:
+        that:
+          - item.via | default('') == management_lab_gateway
+          - item.table | default(254) | int == 254
+        fail_msg: An existing route for the lab subnet conflicts; review Netplan before proceeding.
+      loop: "{{ (netplan_current.stdout | from_yaml).network[management_lab_netplan_type][management_lab_netplan_id].routes | default([]) }}"
+      when: item.to | default('') == management_lab_subnet
+
+    - name: Inspect previous managed overlay
+      ansible.builtin.stat:
+        path: "{{ route_file }}"
+      register: route_previous
+
+    - name: Preserve previous overlay for validation rollback
+      ansible.builtin.slurp:
+        src: "{{ route_file }}"
+      register: route_backup
+      when: route_previous.stat.exists
+
+    - name: Stage and validate the route overlay
+      block:
+        - name: Add route without changing addresses DNS DHCP or default gateway
+          ansible.builtin.copy:
+            dest: "{{ route_file }}"
+            owner: root
+            group: root
+            mode: '0600'
+            backup: true
+            content: |
+              # Managed by configure-lab-route.yml. Other network settings remain unchanged.
+              {{ {'network': {'version': 2, management_lab_netplan_type: {management_lab_netplan_id: {'routes': [{'to': management_lab_subnet, 'via': management_lab_gateway}]}}}} | to_nice_yaml(indent=2) }}
+
+        - name: Validate complete Netplan configuration without activating it
+          ansible.builtin.command: netplan generate
+          changed_when: false
+          when: not ansible_check_mode
+      rescue:
+        - name: Restore previous overlay after validation failure
+          ansible.builtin.copy:
+            dest: "{{ route_file }}"
+            content: "{{ route_backup.content | b64decode }}"
+            owner: root
+            group: root
+            mode: '0600'
+          when: route_previous.stat.exists
+        - name: Remove newly introduced invalid overlay
+          ansible.builtin.file:
+            path: "{{ route_file }}"
+            state: absent
+          when: not route_previous.stat.exists
+        - name: Stop without activating network changes
+          ansible.builtin.fail:
+            msg: Netplan validation failed; the managed overlay was restored. Inspect existing network configuration.
+
+    - name: Explain staged configuration
+      ansible.builtin.debug:
+        msg: >-
+          Route {{ management_lab_subnet }} via {{ management_lab_gateway }} staged.
+          Unless activation was requested, it takes effect on a later Netplan apply or reboot.
+          Review all pending Netplan edits before applying. Check mode does not validate proposed YAML.
+
+    - name: Activate complete Netplan configuration with explicit consent
+      ansible.builtin.command: netplan apply
+      async: 60
+      poll: 0
+      when:
+        - management_lab_route_apply | bool
+        - not ansible_check_mode
+
+    - name: Wait for the requested route to become active
+      ansible.builtin.command:
+        argv: [ip, -j, route, show, "{{ management_lab_subnet }}"]
+      register: active_route
+      changed_when: false
+      retries: 12
+      delay: 5
+      until: >-
+        (active_route.stdout | from_json | selectattr('gateway', 'defined') |
+        selectattr('gateway', 'equalto', management_lab_gateway) | list | length) > 0
+      when:
+        - management_lab_route_apply | bool
+        - not ansible_check_mode

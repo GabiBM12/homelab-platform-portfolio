@@ -1,0 +1,9 @@
+---
+router_wan_address: 192.168.0.200
+router_lan_address: 10.20.10.1
+router_private_subnet: 10.20.10.0/24
+router_management_cidr: 192.168.0.142/32
+# Personal administration laptop's reserved home-LAN IPv4 /32.
+router_admin_cidr: "{{ lookup('ansible.builtin.env', 'ROUTER_ADMIN_CIDR') }}"
+router_network_confirm: false
+router_allow_kubernetes_api: false

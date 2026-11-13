@@ -126,9 +126,9 @@ revert all node networking or delete vmbr10 if guests are already attached.
 
 This is an isolated switch on ONE host, not a router, DHCP server or firewall.
 Router VM deployment, routing/NAT/firewall configuration and management routes
-are separate work. Existing kubernetes.tfvars still targets vmbr0; this playbook
-does not renumber or move existing guests. Do not move them until the router and
-management connectivity are ready. Multi-host connectivity needs a shared path
+are separate work. The control-plane and worker Terraform stacks target vmbr10;
+this playbook does not renumber or move existing guests. Configure the router and
+management connectivity before guest configuration. Multi-host connectivity needs a shared path
 such as a VLAN, not merely matching bridge names.
 
 Source: [Proxmox network API implementation](https://github.com/proxmox/pve-manager/blob/master/PVE/API2/Network.pm).

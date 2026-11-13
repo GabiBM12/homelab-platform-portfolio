@@ -1,0 +1,4 @@
+---
+# Initial networking and public keys remain Terraform/cloud-init owned.
+kubernetes_management_cidr: 192.168.0.142/32
+kubernetes_gateway: 10.20.10.1

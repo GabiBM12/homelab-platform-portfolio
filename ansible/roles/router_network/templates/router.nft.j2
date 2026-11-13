@@ -1,0 +1,38 @@
+# Atomic replacement of ONLY these owned tables. No global flush.
+add table inet homelab_router
+delete table inet homelab_router
+table inet homelab_router {
+    chain input {
+        type filter hook input priority 0; policy drop;
+        iifname "lo" accept
+        ct state invalid drop
+        ct state established,related accept
+        ip protocol icmp accept
+        meta l4proto ipv6-icmp accept
+        iifname "{{ router_wan_interface }}" udp sport 67 udp dport 68 accept
+        iifname "{{ router_wan_interface }}" udp sport 547 udp dport 546 accept
+        iifname "{{ router_wan_interface }}" ip saddr { {{ router_management_cidr }}, {{ router_admin_cidr }} } tcp dport 22 accept
+    }
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+        ct state invalid drop
+        ct state established,related accept
+        iifname "{{ router_wan_interface }}" oifname "{{ router_lan_interface }}" ip saddr {{ router_management_cidr }} ip daddr {{ router_private_subnet }} tcp dport 22 accept
+{% if router_allow_kubernetes_api | bool %}
+        iifname "{{ router_wan_interface }}" oifname "{{ router_lan_interface }}" ip saddr {{ router_management_cidr }} ip daddr {{ router_private_subnet }} tcp dport 6443 accept
+{% endif %}
+        # Initial broad IPv4 egress also includes home LAN services such as DNS.
+        iifname "{{ router_lan_interface }}" oifname "{{ router_wan_interface }}" ip saddr {{ router_private_subnet }} accept
+    }
+    chain output {
+        type filter hook output priority 0; policy accept;
+    }
+}
+add table ip homelab_nat
+delete table ip homelab_nat
+table ip homelab_nat {
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        oifname "{{ router_wan_interface }}" ip saddr {{ router_private_subnet }} masquerade
+    }
+}

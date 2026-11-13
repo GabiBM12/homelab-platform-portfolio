@@ -22,10 +22,11 @@ to configure or repair itself.
 - `ansible/playbooks/bootstrap-management.yml`: common hardening and tools.
 - `ansible/playbooks/register-github-runner.yml`: separate runner registration.
 - `ansible/playbooks/verify-management.yml`: post-registration checks.
+- `ansible/playbooks/configure-lab-route.yml`: persistent management route through
+  router01; see the [route runbook](../../docs/operations/management-lab-route.md).
 - `ansible/roles/`: reusable implementation tasks.
 
 Replace placeholders and establish SSH-key access before running. The bootstrap
 restricts incoming SSH and disables password/root authentication; keep console
 recovery access. No VPN, public port forwarding, or management deployment
 pipeline is required. The runbook is the authoritative procedure.
-

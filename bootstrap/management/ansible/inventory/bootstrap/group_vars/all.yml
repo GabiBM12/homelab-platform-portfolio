@@ -17,6 +17,15 @@ management_allow_runner_docker: false
 management_proxmox_api_hostname: pve.home.locl
 management_proxmox_api_address: 192.168.0.50
 
+# Persistent private-lab route on MANAGEMENT, not a router interface name.
+# Inspect `sudo netplan get` on management and select its existing home-LAN ID.
+management_lab_netplan_type: ethernets
+management_lab_netplan_id: ens33
+management_lab_subnet: 10.20.10.0/24
+management_lab_gateway: 192.168.0.200
+management_lab_route_apply: false
+management_network_console_available: false
+
 # GitHub runner settings. Obtain the version and SHA-256 value from GitHub's
 # "New self-hosted runner" page immediately before registration.
 github_runner_url: https://github.com/GabiBM12/homelab-platform

@@ -1,0 +1,153 @@
+---
+- name: Require Ubuntu and deliberate network activation
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.distribution == 'Ubuntu'
+      - ansible_check_mode or (router_network_confirm | bool)
+      - router_admin_cidr is match('^[0-9]{1,3}(\.[0-9]{1,3}){3}/32$')
+      - router_management_cidr is match('^[0-9]{1,3}(\.[0-9]{1,3}){3}/32$')
+      - router_private_subnet == '10.20.10.0/24'
+    fail_msg: Set the administrator IPv4 /32 and confirm console access before applying.
+
+- name: Discover WAN interface by configured IPv4 address
+  ansible.builtin.set_fact:
+    router_wan_interface: "{{ item }}"
+  loop: "{{ ansible_facts.interfaces }}"
+  when: (ansible_facts[item].ipv4 | default({})).address | default('') == router_wan_address
+
+- name: Discover LAN interface by configured IPv4 address
+  ansible.builtin.set_fact:
+    router_lan_interface: "{{ item }}"
+  loop: "{{ ansible_facts.interfaces }}"
+  when: (ansible_facts[item].ipv4 | default({})).address | default('') == router_lan_address
+
+- name: Require distinct existing interfaces with safe names
+  ansible.builtin.assert:
+    that:
+      - router_wan_interface | default('') is match('^[a-zA-Z0-9_.-]+$')
+      - router_lan_interface | default('') is match('^[a-zA-Z0-9_.-]+$')
+      - router_wan_interface != router_lan_interface
+    fail_msg: Router must already have both Terraform/cloud-init addresses.
+
+- name: Detect competing firewall services
+  ansible.builtin.service_facts:
+
+- name: Refuse competing firewall managers
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.services[item].state | default('stopped') != 'running'
+      - ansible_facts.services[item].status | default('disabled') != 'enabled'
+    fail_msg: Migrate existing firewall management deliberately before using this role.
+  loop: [ufw.service, firewalld.service, nftables.service, netfilter-persistent.service]
+  when: item in ansible_facts.services
+
+- name: Install nftables
+  ansible.builtin.apt:
+    name: nftables
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Check nft availability for read-only preview
+  ansible.builtin.stat:
+    path: /usr/sbin/nft
+  register: nft_binary
+
+- name: Explain first-run check limitation
+  ansible.builtin.debug:
+    msg: nftables is not installed; check mode cannot validate the live firewall. Apply installs it first.
+  when: not nft_binary.stat.exists
+
+- name: Inspect existing firewall tables
+  ansible.builtin.command: /usr/sbin/nft -j list tables
+  register: router_tables
+  changed_when: false
+  check_mode: false
+  when: nft_binary.stat.exists
+
+- name: Refuse unowned firewall tables
+  ansible.builtin.assert:
+    that:
+      - (item.table.family ~ ' ' ~ item.table.name) in ['inet homelab_router', 'ip homelab_nat']
+    fail_msg: Unmanaged firewall tables exist; review before introducing this policy.
+  loop: "{{ (router_tables.stdout | default('{\"nftables\": []}') | from_json).nftables }}"
+  when: item.table is defined
+
+- name: Create dedicated firewall directory
+  ansible.builtin.file:
+    path: /etc/homelab-router
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Validate and install firewall transaction
+  ansible.builtin.template:
+    src: router.nft.j2
+    dest: /etc/homelab-router/router.nft
+    owner: root
+    group: root
+    mode: '0600'
+    backup: true
+    validate: /usr/sbin/nft --check --file %s
+  notify: Reload router firewall
+
+- name: Install dedicated boot-time firewall service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/homelab-router-firewall.service
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Homelab router firewall and IPv4 masquerading
+      DefaultDependencies=no
+      After=local-fs.target
+      Before=network-pre.target shutdown.target
+      Wants=network-pre.target
+      Conflicts=shutdown.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/sbin/nft --file /etc/homelab-router/router.nft
+      ExecReload=/usr/sbin/nft --file /etc/homelab-router/router.nft
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Enable and start firewall before enabling forwarding
+  ansible.builtin.systemd_service:
+    name: homelab-router-firewall
+    daemon_reload: true
+    enabled: true
+    state: started
+  when: not ansible_check_mode
+
+- name: Apply pending firewall updates before forwarding
+  ansible.builtin.meta: flush_handlers
+
+- name: Persist IPv4 forwarding
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/90-homelab-router.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      # Managed by Ansible.
+      net.ipv4.ip_forward = 1
+
+- name: Read live forwarding state
+  ansible.builtin.command: sysctl -n net.ipv4.ip_forward
+  register: router_forwarding
+  changed_when: false
+  check_mode: false
+
+- name: Enable live IPv4 forwarding
+  ansible.builtin.command: sysctl -w net.ipv4.ip_forward=1
+  when: router_forwarding.stdout != '1'
+
+- name: Verify administration connection
+  ansible.builtin.wait_for_connection:
+    timeout: 30
+  when: not ansible_check_mode
