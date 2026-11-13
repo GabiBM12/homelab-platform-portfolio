@@ -1,0 +1,106 @@
+name: Configure router networking
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Preview or apply router firewall, forwarding and NAT
+        type: choice
+        options: [check, apply]
+        default: check
+      confirmation:
+        description: For apply type APPLY router01
+        type: string
+        default: ''
+      console_available:
+        description: I have router console recovery access and an exclusive change window
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: router01-network
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    if: >-
+      github.repository == 'GabiBM12/homelab-platform' &&
+      github.event.repository.private == true &&
+      github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Linux, homelab-management]
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout reviewed main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs and controller tools
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          CONSOLE: ${{ inputs.console_available }}
+        run: |
+          set -euo pipefail
+          [[ "$MODE" == check || "$MODE" == apply ]]
+          if [[ "$MODE" == apply ]]; then
+            [[ "$CONFIRMATION" == "APPLY router01" && "$CONSOLE" == true ]] || {
+              echo "::error::Apply requires exact confirmation and console recovery access."; exit 1;
+            }
+          fi
+          for tool in ansible-playbook ssh-keygen python3; do
+            command -v "$tool" >/dev/null
+          done
+
+      - name: Syntax and policy tests without credentials
+        working-directory: ansible
+        run: |
+          set -euo pipefail
+          ansible-playbook playbooks/router/configure.yml --syntax-check
+          python3 -m unittest discover -s tests -p test_router_network.py -v
+
+      - name: Configure router over verified SSH
+        working-directory: ansible
+        env:
+          MODE: ${{ inputs.mode }}
+          ROUTER_ADMIN_CIDR: ${{ vars.ROUTER_ADMIN_CIDR }}
+          LAB_SSH_PRIVATE_KEY: ${{ secrets.LAB_SSH_PRIVATE_KEY }}
+          LAB_SSH_KNOWN_HOSTS: ${{ secrets.LAB_SSH_KNOWN_HOSTS }}
+          LAB_SUDO_PASSWORD: ${{ secrets.LAB_SUDO_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$LAB_SSH_PRIVATE_KEY" && -n "$LAB_SSH_KNOWN_HOSTS" && -n "$ROUTER_ADMIN_CIDR" ]] || {
+            echo "::error::Missing automation key, trusted known_hosts, or administrator CIDR."; exit 1;
+          }
+          work="$(mktemp -d "$RUNNER_TEMP/router-network.XXXXXX")"
+          cleanup() {
+            rm -f -- "$work/key" "$work/known_hosts"
+            rmdir -- "$work"
+          }
+          trap cleanup EXIT
+          printf '%s\n' "$LAB_SSH_PRIVATE_KEY" > "$work/key"
+          printf '%s\n' "$LAB_SSH_KNOWN_HOSTS" > "$work/known_hosts"
+          unset LAB_SSH_PRIVATE_KEY LAB_SSH_KNOWN_HOSTS
+          # Require a noninteractive automation key and a pinned router host key.
+          ssh-keygen -y -P '' -f "$work/key" >/dev/null
+          ssh-keygen -F 192.168.0.200 -f "$work/known_hosts" >/dev/null
+          export ANSIBLE_CONFIG="$PWD/ansible.cfg"
+          export ANSIBLE_HOST_KEY_CHECKING=True
+          export ANSIBLE_DEBUG=False
+          unset ANSIBLE_LOG_PATH
+          args=(--private-key "$work/key" --ssh-common-args
+            "-o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$work/known_hosts -o ControlMaster=no -o ControlPath=none")
+          if [[ "$MODE" == check ]]; then
+            args+=(--check --diff)
+          else
+            args+=(-e router_network_confirm=true)
+          fi
+          ansible-playbook playbooks/router/configure.yml "${args[@]}"
+          echo "Router mode: $MODE completed. Check mode does not prove live connectivity or nft validation." >> "$GITHUB_STEP_SUMMARY"
