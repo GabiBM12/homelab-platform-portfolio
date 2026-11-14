@@ -32,6 +32,62 @@
 - name: Detect competing firewall services
   ansible.builtin.service_facts:
 
+- name: Inspect and retire only an unused UFW service
+  when: "'ufw.service' in ansible_facts.services"
+  block:
+    - name: Read UFW runtime status without changing rules
+      ansible.builtin.command: /usr/sbin/ufw status
+      environment:
+        LC_ALL: C
+      register: router_ufw_status
+      changed_when: false
+      check_mode: false
+
+    - name: Read UFW persistent enablement
+      ansible.builtin.slurp:
+        src: /etc/ufw/ufw.conf
+      register: router_ufw_config
+
+    - name: Require explicitly inactive UFW
+      ansible.builtin.assert:
+        that:
+          - "router_ufw_status.stdout | trim == 'Status: inactive'"
+          - >-
+            (router_ufw_config.content | b64decode |
+            regex_findall('(?m)^ENABLED=(.*)$')) == ['no']
+        fail_msg: UFW is active or its persistent state is ambiguous; migrate its policy manually.
+
+    - name: Verify empty firewall before stopping the unused UFW service
+      when: >-
+        ansible_facts.services['ufw.service'].status | default('unknown') == 'enabled'
+        or ansible_facts.services['ufw.service'].state | default('unknown') == 'running'
+      block:
+        - name: Read full nftables ruleset before UFW retirement
+          ansible.builtin.command: /usr/sbin/nft -j list ruleset
+          register: router_ufw_ruleset
+          changed_when: false
+          check_mode: false
+
+        - name: Require no live nftables objects before UFW retirement
+          ansible.builtin.assert:
+            that:
+              - >-
+                (router_ufw_ruleset.stdout | from_json).nftables |
+                rejectattr('metainfo', 'defined') | list | length == 0
+            fail_msg: >-
+              Live firewall objects exist. UFW will not be stopped automatically;
+              review the existing policy and perform a deliberate migration.
+
+        - name: Disable and stop verified unused UFW service
+          ansible.builtin.systemd_service:
+            name: ufw.service
+            enabled: false
+            state: stopped
+
+        - name: Record expected UFW service state for subsequent checks
+          ansible.builtin.set_fact:
+            router_ufw_retired: true
+
 - name: Refuse competing firewall managers
   ansible.builtin.assert:
     that:
@@ -39,7 +95,10 @@
       - ansible_facts.services[item].status | default('disabled') != 'enabled'
     fail_msg: Migrate existing firewall management deliberately before using this role.
   loop: [ufw.service, firewalld.service, nftables.service, netfilter-persistent.service]
-  when: item in ansible_facts.services
+  when:
+    - item in ansible_facts.services
+    # service_facts is a snapshot; in check mode the change is only predicted.
+    - not (item == 'ufw.service' and (router_ufw_retired | default(false) | bool))
 
 - name: Install nftables
   ansible.builtin.apt:
